@@ -1,7 +1,7 @@
 import type { EvidenceItem, RuleHit } from '../types';
 import { looksLikeClientPath } from './constants';
 
-export type ScanPhase = 'A' | 'B';
+export type ScanPhase = 'A' | 'B' | 'D';
 type LineContext = { relPath: string; content: string; lines: string[]; phase: ScanPhase };
 
 function lineExcerpt(lines: string[], lineIndex0: number, width = 200): string {

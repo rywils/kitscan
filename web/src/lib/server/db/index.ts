@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS scans (
   error_message TEXT,
   finished_at INTEGER,
   assessment_finished_at INTEGER,
-  source_scan_finished_at INTEGER
+  source_scan_finished_at INTEGER,
+  dep_scan_finished_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS scans_created_idx ON scans (created_at);
 
@@ -68,6 +69,7 @@ export function getDb() {
 	_raw.exec(INIT_SQL);
 	ensureColumn(_raw, 'scans', 'assessment_finished_at', 'assessment_finished_at INTEGER');
 	ensureColumn(_raw, 'scans', 'source_scan_finished_at', 'source_scan_finished_at INTEGER');
+	ensureColumn(_raw, 'scans', 'dep_scan_finished_at', 'dep_scan_finished_at INTEGER');
 	ensureColumn(_raw, 'findings', 'phase', "phase TEXT NOT NULL DEFAULT 'A'");
 	ensureColumn(_raw, 'findings', 'match_key', "match_key TEXT NOT NULL DEFAULT ''");
 	_raw.exec('CREATE INDEX IF NOT EXISTS findings_scan_phase_idx ON findings (scan_id, phase)');

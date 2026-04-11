@@ -3,9 +3,10 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
 import { findings, scans } from '../db/schema';
 import { getDb } from '../db';
-import type { ScanStatus, ScanStep } from '../types';
+import type { RuleHit, ScanStatus, ScanStep } from '../types';
 import { buildFixPrompt } from './prompt';
 import { buildMatchKey, runRulesOnFile, type ScanPhase } from './rules';
+import { runDepScan } from './dep-scan';
 import { collectTextFiles, readUtf8File } from './walk';
 
 const VERBOSE_LIMIT = 2000;
@@ -26,6 +27,7 @@ function setScanState(
 		finishedAt: number | null;
 		assessmentFinishedAt: number | null;
 		sourceScanFinishedAt: number | null;
+		depScanFinishedAt: number | null;
 		stepsJson: string;
 	}>
 ) {
@@ -74,6 +76,35 @@ function markFailure(scanId: string, steps: ScanStep[], message: string) {
 function storeFindings(scanId: string, phase: ScanPhase, hits: ReturnType<typeof runRulesOnFile>) {
 	const db = getDb();
 	db.delete(findings).where(and(eq(findings.scanId, scanId), eq(findings.phase, phase))).run();
+	for (const h of hits) {
+		db.insert(findings)
+			.values({
+				id: crypto.randomUUID(),
+				scanId,
+				phase,
+				matchKey: buildMatchKey(h),
+				ruleId: h.ruleId,
+				title: h.title,
+				severity: h.severity,
+				category: h.category,
+				description: h.description,
+				remediation: h.remediation,
+				confidence: h.confidence,
+				filePath: h.filePath,
+				line: h.line,
+				excerpt: h.excerpt,
+				evidenceJson: JSON.stringify(h.evidence),
+				verificationStatus: null,
+				verifiedSnippet: null,
+				verifiedAt: null,
+				fixPrompt: buildFixPrompt(h, h.excerpt)
+			})
+			.run();
+	}
+}
+
+function appendFindings(scanId: string, phase: ScanPhase, hits: RuleHit[]) {
+	const db = getDb();
 	for (const h of hits) {
 		db.insert(findings)
 			.values({
@@ -150,12 +181,52 @@ export async function executeAssessment(scanId: string): Promise<void> {
 		pushStep(steps, 'info', '[Phase A] Assessment started');
 		pushStep(steps, 'info', `Input path: ${row.sourcePath}`);
 		runRulePass(scanId, row.sourcePath, 'A', steps, true);
-		pushStep(steps, 'info', '[Phase A] Complete. Run Phase B for secondary scan and diff.');
+
+		pushStep(steps, 'info', '[Phase A] Complete. Run Phase B for deeper analysis, or Dep Scan for dependency vulnerabilities.');
 		setScanState(scanId, {
 			status: 'completed',
 			errorMessage: null,
 			finishedAt: Date.now(),
 			assessmentFinishedAt: Date.now(),
+			stepsJson: JSON.stringify(steps)
+		});
+	} catch (e) {
+		markFailure(scanId, steps, e instanceof Error ? e.message : String(e));
+	}
+}
+
+export async function executeDepScan(scanId: string): Promise<void> {
+	const db = getDb();
+	const row = db.select().from(scans).where(eq(scans.id, scanId)).get();
+	if (!row) return;
+	let steps: ScanStep[] = [];
+	try {
+		steps = JSON.parse(row.stepsJson || '[]') as ScanStep[];
+	} catch {
+		steps = [];
+	}
+
+	try {
+		prepareRun(scanId, steps);
+		pushStep(steps, 'info', '[Phase D] Dependency vulnerability scan started');
+		persistSteps(scanId, steps);
+		const depResult = await runDepScan(row.sourcePath);
+		if (depResult.error) {
+			pushStep(steps, 'warn', `[Phase D] Dependency scan error: ${depResult.error}`);
+		} else {
+			pushStep(steps, 'info', `[Phase D] ${depResult.lockfilesFound.length} lockfile(s) found, ${depResult.packagesQueried} packages queried, ${depResult.hits.length} vulnerabilities found.`);
+		}
+		const db2 = getDb();
+		db2.delete(findings).where(and(eq(findings.scanId, scanId), eq(findings.phase, 'D'))).run();
+		if (depResult.hits.length > 0) {
+			appendFindings(scanId, 'D', depResult.hits);
+		}
+		pushStep(steps, 'info', '[Phase D] Complete.');
+		setScanState(scanId, {
+			status: 'completed',
+			errorMessage: null,
+			finishedAt: Date.now(),
+			depScanFinishedAt: Date.now(),
 			stepsJson: JSON.stringify(steps)
 		});
 	} catch (e) {

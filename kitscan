@@ -7,9 +7,10 @@ BUILD_ENTRY="$WEB_DIR/build/index.js"
 
 PORT="${PORT:-3000}"
 HOST="${HOST:-127.0.0.1}"
+VERSION="$(node -e "process.stdout.write(require('${WEB_DIR}/package.json').version)" 2>/dev/null || echo "unknown")"
 
 print_help() {
-	echo "kitscan - start Security Audit Scanner UI"
+	echo "kitscan v${VERSION} - start Security Audit Scanner UI"
 	echo
 	echo "Usage:"
 	echo "  ./kitscan [options]"
@@ -98,5 +99,6 @@ if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$PORT )" | rg -q ":$PORT
 	exit 1
 fi
 
+echo "kitscan v${VERSION}"
 echo "Your Web UI is accessible at: http://$HOST:$PORT"
 exec env PORT="$PORT" HOST="$HOST" node "$BUILD_ENTRY"

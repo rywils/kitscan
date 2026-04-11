@@ -74,6 +74,11 @@ const BY_RULE: Record<string, VulnReference[]> = {
 	],
 	'lint-suppression-smell': [
 		{ label: 'OWASP ASVS', url: 'https://owasp.org/www-project-application-security-verification-standard/', reason: 'Verification baseline for secure development controls.' }
+	],
+	'dep-vuln': [
+		{ label: 'OSV.dev', url: 'https://osv.dev/', reason: 'Open source vulnerability database used to identify this advisory.' },
+		{ label: 'NIST National Vulnerability Database', url: 'https://nvd.nist.gov/vuln', reason: 'CVE detail, CVSS severity scoring, and enrichment.' },
+		{ label: 'OWASP A06: Vulnerable and Outdated Components', url: 'https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/', reason: 'Primary OWASP guidance for dependency management and patching.' }
 	]
 };
 
@@ -82,7 +87,8 @@ const BY_CATEGORY: Record<string, VulnReference[]> = {
 	xss: [{ label: 'OWASP XSS Prevention', url: 'https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html', reason: 'Category-level output encoding/sanitization guidance.' }],
 	authz: [{ label: 'OWASP A01: Broken Access Control', url: 'https://owasp.org/Top10/A01_2021-Broken_Access_Control/', reason: 'Category-level access-control guidance.' }],
 	secrets: [{ label: 'OWASP Secrets Management', url: 'https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html', reason: 'Category-level secret handling guidance.' }],
-	hygiene: [{ label: 'OWASP ASVS', url: 'https://owasp.org/www-project-application-security-verification-standard/', reason: 'Category-level secure engineering assurance guidance.' }]
+	hygiene: [{ label: 'OWASP ASVS', url: 'https://owasp.org/www-project-application-security-verification-standard/', reason: 'Category-level secure engineering assurance guidance.' }],
+	dependencies: [{ label: 'OWASP A06: Vulnerable and Outdated Components', url: 'https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/', reason: 'Category-level dependency patching guidance.' }]
 };
 
 export function referencesFor(

@@ -13,11 +13,12 @@
 		errorMessage: string | null;
 		assessmentFinishedAt: number | null;
 		sourceScanFinishedAt: number | null;
+		depScanFinishedAt: number | null;
 	};
 
 	type Finding = {
 		id: string;
-		phase: 'A' | 'B';
+		phase: 'A' | 'B' | 'D';
 		ruleId: string;
 		title: string;
 		severity: string;
@@ -47,7 +48,7 @@ type FindingSummary = {
 	let scan = $state<ScanRow | null>(null);
 	let findings = $state<Finding[]>([]);
 	let logs = $state<string[]>([]);
-	let logPhase = $state<'A' | 'B'>('A');
+	let logPhase = $state<'A' | 'B' | 'D'>('A');
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let selectedFinal = $state<string | null>(null);
 	let chartMode = $state<'pie' | 'bar'>('pie');
@@ -64,13 +65,14 @@ type FindingSummary = {
 
 	const phaseA = $derived(findings.filter((f) => f.phase === 'A'));
 	const phaseB = $derived(findings.filter((f) => f.phase === 'B'));
+	const phaseD = $derived(findings.filter((f) => f.phase === 'D'));
 
 	const phaseAKeys = $derived(new Set(phaseA.map((f) => f.matchKey || `${f.ruleId}|${f.filePath}|${f.line}|${f.title}`)));
 	const phaseBKeys = $derived(new Set(phaseB.map((f) => f.matchKey || `${f.ruleId}|${f.filePath}|${f.line}|${f.title}`)));
 	const falsePositives = $derived(phaseA.filter((f) => !phaseBKeys.has(f.matchKey || `${f.ruleId}|${f.filePath}|${f.line}|${f.title}`)));
 	const missedByA = $derived(phaseB.filter((f) => !phaseAKeys.has(f.matchKey || `${f.ruleId}|${f.filePath}|${f.line}|${f.title}`)));
 	const confirmed = $derived(phaseB.filter((f) => phaseAKeys.has(f.matchKey || `${f.ruleId}|${f.filePath}|${f.line}|${f.title}`)));
-	const combinedFinalFindings = $derived([...confirmed, ...missedByA]);
+	const combinedFinalFindings = $derived([...confirmed, ...missedByA, ...phaseD]);
 	const activeMode = $derived(viewMode === 'a-only' ? 'A' : viewMode === 'b-only' ? 'B' : 'combined');
 	const finalFindings = $derived(activeMode === 'A' ? phaseA : activeMode === 'B' ? phaseB : combinedFinalFindings);
 	const selected = $derived(selectedFinal ? finalFindings.find((f) => f.id === selectedFinal) ?? null : finalFindings[0] ?? null);
@@ -120,6 +122,7 @@ type FindingSummary = {
 
 	const phaseASummary = $derived(summarizeFindings(phaseA));
 	const phaseBSummary = $derived(summarizeFindings(phaseB));
+	const phaseDSummary = $derived(summarizeFindings(phaseD));
 	const finalSummary = $derived(summarizeFindings(finalFindings));
 
 	const phaseAState = $derived.by(() => {
@@ -138,25 +141,41 @@ type FindingSummary = {
 	});
 
 	const phaseAButtonLabel = $derived(
-		phaseAState === 'done' ? 'Completed Phase A' : phaseAState === 'running' ? 'Running...' : 'Run Phase A'
+		phaseAState === 'done' ? 'Completed Light Scan' : phaseAState === 'running' ? 'Running...' : 'Run Light Scan'
 	);
 	const phaseBButtonLabel = $derived(
-		phaseBState === 'done' ? 'Completed Phase B' : phaseBState === 'running' ? 'Running...' : 'Run Phase B'
+		phaseBState === 'done' ? 'Completed Deep Scan' : phaseBState === 'running' ? 'Running...' : 'Run Deep Scan'
+	);
+
+	const phaseDState = $derived.by(() => {
+		if (!scan) return 'idle';
+		if (scan.depScanFinishedAt) return 'done';
+		if (scan.status === 'running' && !scan.depScanFinishedAt) return 'running';
+		return 'ready';
+	});
+	const phaseDButtonLabel = $derived(
+		phaseDState === 'done' ? 'Completed Dep Scan' : phaseDState === 'running' ? 'Running...' : 'Run Dep Scan'
 	);
 
 	const phaseABar = $derived(phaseAState === 'done' ? 100 : phaseAState === 'running' ? 60 : 0);
 	const phaseBBar = $derived(phaseBState === 'done' ? 100 : phaseBState === 'running' ? 60 : 0);
+	const phaseDBar = $derived(phaseDState === 'done' ? 100 : phaseDState === 'running' ? 60 : 0);
 	const phaseABarClass = $derived(phaseABar === 100 ? 'bar-100' : phaseABar === 60 ? 'bar-60' : 'bar-0');
 	const phaseBBarClass = $derived(phaseBBar === 100 ? 'bar-100' : phaseBBar === 60 ? 'bar-60' : 'bar-0');
+	const phaseDBarClass = $derived(phaseDBar === 100 ? 'bar-100' : phaseDBar === 60 ? 'bar-60' : 'bar-0');
 
 	const showPhaseAResults = $derived(phaseAState === 'running' || phaseAState === 'done');
 	const showPhaseBResults = $derived(phaseBState === 'running' || phaseBState === 'done');
+	const showPhaseDResults = $derived(phaseDState === 'running' || phaseDState === 'done');
 	const showDiffs = $derived(activeMode === 'combined' && (phaseBState === 'running' || phaseBState === 'done'));
-	const showChart = $derived((activeMode === 'combined' && (phaseBState === 'running' || phaseBState === 'done')) || (activeMode === 'B' && (phaseBState === 'running' || phaseBState === 'done')));
+	const showChart = $derived(
+		(activeMode === 'combined' && (phaseBState === 'done' || phaseDState === 'done')) ||
+		(activeMode === 'B' && (phaseBState === 'running' || phaseBState === 'done'))
+	);
 	const showFinal = $derived(
 		(activeMode === 'A' && (phaseAState === 'running' || phaseAState === 'done')) ||
 			(activeMode === 'B' && (phaseBState === 'running' || phaseBState === 'done')) ||
-			(activeMode === 'combined' && (phaseBState === 'running' || phaseBState === 'done'))
+			(activeMode === 'combined' && (phaseBState === 'done' || phaseDState === 'done'))
 	);
 	const showHydratedReport = $derived(showFinal);
 
@@ -171,6 +190,8 @@ type FindingSummary = {
 		const msgs = allSteps.map((s) => s.message);
 		if (logPhase === 'B') {
 			logs = msgs.filter((m) => m.includes('[Phase B]')).slice(-300);
+		} else if (logPhase === 'D') {
+			logs = msgs.filter((m) => m.includes('[Phase D]')).slice(-300);
 		} else {
 			logs = msgs.slice(-300);
 		}
@@ -244,6 +265,14 @@ type FindingSummary = {
 		await refreshScan();
 	}
 
+	async function runDepScanPhase() {
+		if (!scanId || phaseDState === 'running' || phaseDState === 'done') return;
+		logPhase = 'D';
+		logs = [];
+		await fetch(resolve(`/api/scans/${scanId}/dep-scan`), { method: 'POST' });
+		await refreshScan();
+	}
+
 	async function waitForCompletion(check: () => boolean, timeoutMs = 15 * 60 * 1000) {
 		const start = Date.now();
 		while (Date.now() - start < timeoutMs) {
@@ -256,7 +285,7 @@ type FindingSummary = {
 	}
 
 	async function runAllPhases() {
-		if (!scanId || runAllLoading || phaseAState === 'running' || phaseBState === 'running') return;
+		if (!scanId || runAllLoading || phaseAState === 'running' || phaseBState === 'running' || phaseDState === 'running') return;
 		runAllLoading = true;
 		err = null;
 		try {
@@ -268,6 +297,10 @@ type FindingSummary = {
 			if (!scan?.sourceScanFinishedAt) {
 				await runPhaseB();
 				await waitForCompletion(() => !!scan?.sourceScanFinishedAt);
+			}
+			if (!scan?.depScanFinishedAt) {
+				await runDepScanPhase();
+				await waitForCompletion(() => !!scan?.depScanFinishedAt);
 			}
 		} finally {
 			runAllLoading = false;
@@ -415,7 +448,7 @@ type FindingSummary = {
 	});
 
 	$effect(() => {
-		if (phaseBState !== 'running' && phaseBState !== 'done') {
+		if (phaseBState !== 'running' && phaseBState !== 'done' && phaseDState !== 'running' && phaseDState !== 'done') {
 			chartMode = 'pie';
 		}
 	});
@@ -467,13 +500,13 @@ type FindingSummary = {
 		{#if !mounted}
 			<p class="muted">Workspace appears here after mounting a directory.</p>
 		{:else}
-			<div class="grid2">
+			<div class="grid3">
 				<section class="phase-box">
-					<h2>Phase A</h2>
-					<p class="phase-help">Initial application scan for baseline findings.</p>
+					<h2>Light Scan</h2>
+					<p class="phase-help">Fast, high-confidence static analysis rules.</p>
 					<button
 						class={`${phaseClass(phaseAState)} tip-target`}
-						data-tooltip="Runs baseline scanning rules to produce initial vulnerability findings."
+						data-tooltip="Runs fast, high-confidence static analysis rules on source code."
 						onclick={runPhaseA}
 						disabled={phaseAState === 'running' || phaseAState === 'done'}
 					>
@@ -485,11 +518,11 @@ type FindingSummary = {
 				</section>
 
 				<section class="phase-box">
-					<h2>Phase B</h2>
-					<p class="phase-help">Source-code scan to validate and refine findings.</p>
+					<h2>Deep Scan</h2>
+					<p class="phase-help">Broader rules — diff against Light removes false positives.</p>
 					<button
 						class={`${phaseClass(phaseBState)} tip-target`}
-						data-tooltip="Runs deeper secondary scanning used to compare against Phase A and improve accuracy."
+						data-tooltip="Runs broader static analysis. Only findings confirmed by both Light and Deep survive to the final list."
 						onclick={runPhaseB}
 						disabled={phaseBState === 'running' || phaseBState === 'done' || (!scan?.assessmentFinishedAt && viewMode !== 'b-only')}
 					>
@@ -499,20 +532,36 @@ type FindingSummary = {
 					<div class="progress"><div class={`bar ${phaseBBarClass}`}></div></div>
 					<p class="muted">Findings: {phaseB.length}</p>
 				</section>
+
+				<section class="phase-box phase-box-dep">
+					<h2>Dep Scan</h2>
+					<p class="phase-help">Lockfile scan for known CVEs via OSV.dev.</p>
+					<button
+						class={`${phaseClass(phaseDState)} tip-target`}
+						data-tooltip="Queries OSV.dev for known CVEs in your locked dependencies. Results go directly to the final list."
+						onclick={runDepScanPhase}
+						disabled={phaseDState === 'running' || phaseDState === 'done'}
+					>
+						{#if phaseDState === 'running'}<span class="spinner" aria-hidden="true"></span>{/if}
+						{phaseDButtonLabel}
+					</button>
+					<div class="progress"><div class={`bar ${phaseDBarClass}`}></div></div>
+					<p class="muted">Findings: {phaseD.length}</p>
+				</section>
 			</div>
 			<div class="view-mode-wrap">
 				<div class="view-mode-toggle" role="radiogroup" aria-label="Results view mode">
 					<button type="button" class={`mode-opt ${viewMode === 'combined' ? 'active' : ''}`} onclick={() => (viewMode = 'combined')}>Combined</button>
-					<button type="button" class={`mode-opt ${viewMode === 'a-only' ? 'active' : ''}`} onclick={() => (viewMode = 'a-only')}>Phase A only</button>
-					<button type="button" class={`mode-opt ${viewMode === 'b-only' ? 'active' : ''}`} onclick={() => (viewMode = 'b-only')}>Phase B only</button>
+					<button type="button" class={`mode-opt ${viewMode === 'a-only' ? 'active' : ''}`} onclick={() => (viewMode = 'a-only')}>Light only</button>
+					<button type="button" class={`mode-opt ${viewMode === 'b-only' ? 'active' : ''}`} onclick={() => (viewMode = 'b-only')}>Deep only</button>
 				</div>
 			</div>
 			<div class="run-all-wrap">
 				<button
 					class="run-all-btn tip-target"
-					data-tooltip="Runs Phase A and then Phase B sequentially."
+					data-tooltip="Runs Light Scan, Deep Scan, and Dep Scan sequentially."
 					onclick={runAllPhases}
-					disabled={runAllLoading || phaseAState === 'running' || phaseBState === 'running' || phaseBState === 'done'}
+					disabled={runAllLoading || phaseAState === 'running' || phaseBState === 'running' || phaseDState === 'running' || (phaseBState === 'done' && phaseDState === 'done')}
 				>
 					{#if runAllLoading}<span class="spinner" aria-hidden="true"></span>{/if}
 					{runAllLoading ? 'Running all phases...' : 'Run All Phases'}
@@ -534,7 +583,7 @@ type FindingSummary = {
 		{/if}
 
 		<section class="panel terminal fullwidth">
-			<h2>Live scan output {#if logPhase === 'B'}(Phase B){/if}</h2>
+			<h2>Live scan output {#if logPhase === 'B'}(Deep Scan){:else if logPhase === 'D'}(Dep Scan){/if}</h2>
 			<div class="term-box" role="log" aria-live="polite" aria-atomic="false">
 				{#if logs.length === 0}
 					<div class="line muted">No output yet.</div>
@@ -550,7 +599,7 @@ type FindingSummary = {
 			{#if showPhaseAResults && !showChart}
 				{#if activeMode !== 'B'}
 					<section class="panel mini result-card">
-						<h3>Phase A Results ({phaseA.length})</h3>
+						<h3>Light Scan Results ({phaseA.length})</h3>
 						<div class="mini-list">
 							{#each phaseASummary as s (s.key)}
 								<details class="finding-row">
@@ -565,6 +614,24 @@ type FindingSummary = {
 						</div>
 					</section>
 				{/if}
+			{/if}
+
+			{#if showPhaseDResults && activeMode === 'combined'}
+				<section class="panel mini result-card">
+					<h3>Dep Scan Results ({phaseD.length})</h3>
+					<div class="mini-list">
+						{#each phaseDSummary as s (s.key)}
+							<details class="finding-row">
+								<summary class="item"><span class={`sev sev-${s.severity.toLowerCase()}`}>{s.severity}</span><span>{s.title} [{s.count}]</span></summary>
+								<ul class="loc-list">
+									{#each s.locations as loc (`${loc.label}`)}
+										<li>{loc.label} [{loc.count}]</li>
+									{/each}
+								</ul>
+							</details>
+						{/each}
+					</div>
+				</section>
 			{/if}
 
 			{#if showChart}
@@ -596,7 +663,7 @@ type FindingSummary = {
 				</section>
 
 				<section class="panel mini result-card">
-					<h3>Phase A Results ({phaseA.length})</h3>
+					<h3>Light Scan Results ({phaseA.length})</h3>
 					<div class="mini-list">
 						{#each phaseASummary as s (s.key)}
 							<details class="finding-row">
@@ -613,7 +680,7 @@ type FindingSummary = {
 
 				{#if activeMode !== 'A'}
 					<section class="panel mini result-card">
-						<h3>Phase B Results ({phaseB.length})</h3>
+						<h3>Deep Scan Results ({phaseB.length})</h3>
 						<div class="mini-list">
 							{#each phaseBSummary as s (s.key)}
 								<details class="finding-row">
@@ -632,10 +699,10 @@ type FindingSummary = {
 				<section class="panel mini result-card">
 					<h3>Differences</h3>
 					{#if falsePositives.length === 0 && missedByA.length === 0}
-						<p class="muted">No differences between application scan and source code scan</p>
+						<p class="muted">No differences between Light and Deep scans</p>
 					{:else}
-						<p class="muted">False positives from A: {falsePositives.length}</p>
-						<p class="muted">Undetected in A (found in B): {missedByA.length}</p>
+						<p class="muted">Light-only (filtered out): {falsePositives.length}</p>
+						<p class="muted">Deep-only (added): {missedByA.length}</p>
 					{/if}
 				</section>
 			{/if}
@@ -736,6 +803,10 @@ type FindingSummary = {
 	.right.show { opacity: 1; transform: translateY(0); }
 	.grid2 { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
 	@media (min-width: 720px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+	.grid3 { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
+	@media (min-width: 720px) { .grid3 { grid-template-columns: 1fr 1fr; } }
+	@media (min-width: 1100px) { .grid3 { grid-template-columns: 1fr 1fr 1fr; } }
+	.phase-box-dep { border-color: #1d4ed8; }
 	.phase-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; }
 	.phase-box h2 { margin: 0 0 0.55rem; font-size: 0.95rem; }
 	.phase-help { margin: -0.2rem 0 0.55rem; font-size: 0.78rem; color: var(--muted); }

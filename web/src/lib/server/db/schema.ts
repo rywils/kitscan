@@ -11,7 +11,8 @@ export const scans = sqliteTable(
 		errorMessage: text('error_message'),
 		finishedAt: integer('finished_at'),
 		assessmentFinishedAt: integer('assessment_finished_at'),
-		sourceScanFinishedAt: integer('source_scan_finished_at')
+		sourceScanFinishedAt: integer('source_scan_finished_at'),
+		depScanFinishedAt: integer('dep_scan_finished_at')
 	},
 	(t) => [index('scans_created_idx').on(t.createdAt)]
 );
