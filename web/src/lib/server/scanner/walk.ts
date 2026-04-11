@@ -4,9 +4,6 @@ import { isTextFile, MAX_DEPTH, MAX_FILE_BYTES, MAX_FILES, SKIP_DIR_NAMES } from
 
 export type FileEntry = { absPath: string; relPath: string };
 
-/**
- * Iterative directory walk with depth/file limits and skip rules.
- */
 export function collectTextFiles(rootAbs: string): { files: FileEntry[]; truncated: boolean } {
 	const root = rootAbs.replace(/\/$/, '');
 	const files: FileEntry[] = [];

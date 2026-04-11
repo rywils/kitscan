@@ -4,8 +4,6 @@ import type { RuleHit } from '../types';
 
 type DepEntry = { name: string; version: string; source: string };
 
-// ── lockfile parsers ──────────────────────────────────────────────────────────
-
 function parsePackageLockV2(content: string, relPath: string): DepEntry[] {
 	let obj: unknown;
 	try {
@@ -39,7 +37,6 @@ function parsePnpmLock(content: string, relPath: string): DepEntry[] {
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i] ?? '';
 
-		// Top-level section headers
 		if (/^[a-zA-Z]/.test(line) && line.endsWith(':')) {
 			inPackages = line.startsWith('packages:') || line.startsWith('snapshots:');
 			continue;
@@ -47,27 +44,19 @@ function parsePnpmLock(content: string, relPath: string): DepEntry[] {
 
 		if (!inPackages) continue;
 
-		// pnpm v9+ lockfile: "  /name@version:" or "  name@version:"
-		// pnpm v6/v8: "  /name/version:" or "  /@scope/name/version:"
 		const pkgHeader = line.match(/^  ['"]?([^'":\s]+)['"]?:\s*$/);
 		if (!pkgHeader) continue;
 
 		const raw = pkgHeader[1]!;
-
-		// Attempt to parse name@version from the key
 		let name: string | null = null;
 		let version: string | null = null;
-
-		// Strip leading slash (pnpm v6 style)
 		const stripped = raw.startsWith('/') ? raw.slice(1) : raw;
 
-		// name@version format (pnpm v8+)
 		const atMatch = stripped.match(/^(@?[^@]+)@([^\s(]+)/);
 		if (atMatch) {
 			name = atMatch[1]!;
 			version = atMatch[2]!.replace(/\(.*$/, '');
 		} else {
-			// legacy /name/version format
 			const parts = stripped.split('/');
 			if (parts.length >= 2) {
 				const maybeVersion = parts[parts.length - 1]!;
@@ -80,7 +69,6 @@ function parsePnpmLock(content: string, relPath: string): DepEntry[] {
 
 		if (!name || !version) continue;
 
-		// Skip obviously non-prod entries by checking next few lines for `dev: true`
 		let isDev = false;
 		for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
 			const next = lines[j] ?? '';
@@ -103,16 +91,13 @@ function parseYarnLock(content: string, relPath: string): DepEntry[] {
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i] ?? '';
-		// yarn.lock block header: `"name@^version", "name@~version":`  or `name@version:`
 		if (!line.endsWith(':') || line.startsWith(' ') || line.startsWith('#')) continue;
 
-		// Extract the first specifier to get the package name
 		const header = line.replace(/:$/, '').replace(/^"/, '').replace(/"$/, '').split(',')[0]!.trim().replace(/^"/, '');
 		const atIdx = header.lastIndexOf('@');
 		if (atIdx <= 0) continue;
 		const name = header.slice(0, atIdx);
 
-		// Find `version "x.y.z"` in the next few lines
 		let version: string | null = null;
 		for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
 			const next = lines[j] ?? '';
@@ -140,8 +125,6 @@ function parseCargoLock(content: string, relPath: string): DepEntry[] {
 	}
 	return out;
 }
-
-// ── lockfile discovery ────────────────────────────────────────────────────────
 
 const LOCKFILE_NAMES = new Set([
 	'package-lock.json',
@@ -177,8 +160,6 @@ function findLockfiles(rootAbs: string): { absPath: string; relPath: string; nam
 	}
 	return found;
 }
-
-// ── OSV.dev query ─────────────────────────────────────────────────────────────
 
 type OsvPackage = { name: string; version: string; ecosystem: string };
 type OsvQuery = { package: OsvPackage };
@@ -252,17 +233,13 @@ async function fetchOsvVulnDetails(ids: string[]): Promise<Map<string, OsvVuln>>
 	return map;
 }
 
-// ── severity mapping ──────────────────────────────────────────────────────────
-
 function osvSeverityToInternal(vuln: OsvVuln): RuleHit['severity'] {
-	// Try database_specific first (GitHub advisory severities)
 	const ds = vuln.database_specific?.severity?.toUpperCase();
 	if (ds === 'CRITICAL') return 'critical';
 	if (ds === 'HIGH') return 'high';
 	if (ds === 'MODERATE' || ds === 'MEDIUM') return 'medium';
 	if (ds === 'LOW') return 'low';
 
-	// Try CVSS score from severity array
 	for (const s of vuln.severity ?? []) {
 		if (s.type === 'CVSS_V3' || s.type === 'CVSS_V2') {
 			const score = parseFloat(s.score);
@@ -288,12 +265,6 @@ function fixedVersion(vuln: OsvVuln, ecosystem: string): string | null {
 		}
 	}
 	return null;
-}
-
-function vulnAppliesToEcosystem(vuln: OsvVuln, ecosystem: string): boolean {
-	return (vuln.affected ?? []).some(
-		(aff) => aff.package?.ecosystem?.toLowerCase() === ecosystem.toLowerCase()
-	);
 }
 
 function parseSemver(v: string): [number, number, number] {
@@ -337,8 +308,6 @@ function versionIsVulnerable(vuln: OsvVuln, packageVersion: string, ecosystem: s
 	return false;
 }
 
-// ── main export ───────────────────────────────────────────────────────────────
-
 export type DepScanResult = {
 	hits: RuleHit[];
 	lockfilesFound: string[];
@@ -352,7 +321,6 @@ export async function runDepScan(rootAbs: string): Promise<DepScanResult> {
 		return { hits: [], lockfilesFound: [], packagesQueried: 0 };
 	}
 
-	// Parse all lockfiles into DepEntry lists, tagged by ecosystem
 	const allEntries: (DepEntry & { ecosystem: string })[] = [];
 	for (const lf of lockfiles) {
 		let content: string;
@@ -370,7 +338,6 @@ export async function runDepScan(rootAbs: string): Promise<DepScanResult> {
 		return { hits: [], lockfilesFound: lockfiles.map((l) => l.relPath), packagesQueried: 0 };
 	}
 
-	// Deduplicate by name+version+ecosystem before querying
 	const seen = new Map<string, DepEntry & { ecosystem: string }>();
 	for (const e of allEntries) {
 		const key = `${e.ecosystem}:${e.name}@${e.version}`;
@@ -378,12 +345,10 @@ export async function runDepScan(rootAbs: string): Promise<DepScanResult> {
 	}
 	const unique = [...seen.values()];
 
-	// Query OSV in batches
 	const queries: OsvQuery[] = unique.map((e) => ({
 		package: { name: e.name, version: e.version, ecosystem: e.ecosystem }
 	}));
 
-	// Step 1: querybatch to get matching vuln IDs per package
 	let osvResult: OsvBatchResult;
 	try {
 		const batches: OsvBatchResult['results'] = [];
@@ -402,7 +367,6 @@ export async function runDepScan(rootAbs: string): Promise<DepScanResult> {
 		};
 	}
 
-	// Step 2: collect unique vuln IDs across all results
 	const vulnIdToEntries = new Map<string, (DepEntry & { ecosystem: string })[]>();
 	for (let qi = 0; qi < unique.length; qi++) {
 		const entry = unique[qi]!;
@@ -417,7 +381,6 @@ export async function runDepScan(rootAbs: string): Promise<DepScanResult> {
 		return { hits: [], lockfilesFound: lockfiles.map((l) => l.relPath), packagesQueried: unique.length };
 	}
 
-	// Step 3: fetch full details for each unique vuln ID
 	let detailMap: Map<string, OsvVuln>;
 	try {
 		detailMap = await fetchOsvVulnDetails([...vulnIdToEntries.keys()]);
@@ -430,16 +393,12 @@ export async function runDepScan(rootAbs: string): Promise<DepScanResult> {
 		};
 	}
 
-	// Step 4: build findings
 	const hits: RuleHit[] = [];
 	for (const [vulnId, entries] of vulnIdToEntries) {
 		const vuln = detailMap.get(vulnId);
 		if (!vuln) continue;
 
 		const ecosystem = entries[0]?.ecosystem ?? 'npm';
-		if (!vulnAppliesToEcosystem(vuln, ecosystem)) continue;
-
-		// Filter out entries where the installed version is not in a vulnerable range
 		const vulnerableEntries = entries.filter((e) => versionIsVulnerable(vuln, e.version, ecosystem));
 		if (vulnerableEntries.length === 0) continue;
 

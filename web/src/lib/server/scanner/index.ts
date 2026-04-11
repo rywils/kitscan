@@ -73,38 +73,9 @@ function markFailure(scanId: string, steps: ScanStep[], message: string) {
 	});
 }
 
-function storeFindings(scanId: string, phase: ScanPhase, hits: ReturnType<typeof runRulesOnFile>) {
+function insertFindings(scanId: string, phase: ScanPhase, hits: RuleHit[], replace = false) {
 	const db = getDb();
-	db.delete(findings).where(and(eq(findings.scanId, scanId), eq(findings.phase, phase))).run();
-	for (const h of hits) {
-		db.insert(findings)
-			.values({
-				id: crypto.randomUUID(),
-				scanId,
-				phase,
-				matchKey: buildMatchKey(h),
-				ruleId: h.ruleId,
-				title: h.title,
-				severity: h.severity,
-				category: h.category,
-				description: h.description,
-				remediation: h.remediation,
-				confidence: h.confidence,
-				filePath: h.filePath,
-				line: h.line,
-				excerpt: h.excerpt,
-				evidenceJson: JSON.stringify(h.evidence),
-				verificationStatus: null,
-				verifiedSnippet: null,
-				verifiedAt: null,
-				fixPrompt: buildFixPrompt(h, h.excerpt)
-			})
-			.run();
-	}
-}
-
-function appendFindings(scanId: string, phase: ScanPhase, hits: RuleHit[]) {
-	const db = getDb();
+	if (replace) db.delete(findings).where(and(eq(findings.scanId, scanId), eq(findings.phase, phase))).run();
 	for (const h of hits) {
 		db.insert(findings)
 			.values({
@@ -161,7 +132,7 @@ function runRulePass(scanId: string, sourcePath: string, phase: ScanPhase, steps
 	if (verbose && skippedVerbose > 0) {
 		pushStep(steps, 'warn', `[Phase ${phase}] Verbose output truncated after ${VERBOSE_LIMIT} files (${skippedVerbose} omitted).`);
 	}
-	storeFindings(scanId, phase, hits);
+	insertFindings(scanId, phase, hits, true);
 	pushStep(steps, 'info', `[Phase ${phase}] Findings stored: ${hits.length}`);
 }
 
@@ -182,7 +153,7 @@ export async function executeAssessment(scanId: string): Promise<void> {
 		pushStep(steps, 'info', `Input path: ${row.sourcePath}`);
 		runRulePass(scanId, row.sourcePath, 'A', steps, true);
 
-		pushStep(steps, 'info', '[Phase A] Complete. Run Phase B for deeper analysis, or Dep Scan for dependency vulnerabilities.');
+		pushStep(steps, 'info', '[Phase A] Complete.');
 		setScanState(scanId, {
 			status: 'completed',
 			errorMessage: null,
@@ -216,11 +187,7 @@ export async function executeDepScan(scanId: string): Promise<void> {
 		} else {
 			pushStep(steps, 'info', `[Phase D] ${depResult.lockfilesFound.length} lockfile(s) found, ${depResult.packagesQueried} packages queried, ${depResult.hits.length} vulnerabilities found.`);
 		}
-		const db2 = getDb();
-		db2.delete(findings).where(and(eq(findings.scanId, scanId), eq(findings.phase, 'D'))).run();
-		if (depResult.hits.length > 0) {
-			appendFindings(scanId, 'D', depResult.hits);
-		}
+		insertFindings(scanId, 'D', depResult.hits, true);
 		pushStep(steps, 'info', '[Phase D] Complete.');
 		setScanState(scanId, {
 			status: 'completed',
@@ -249,7 +216,7 @@ export async function executeSourceScan(scanId: string): Promise<void> {
 		prepareRun(scanId, steps);
 		pushStep(steps, 'info', '[Phase B] Secondary source scan started');
 		runRulePass(scanId, row.sourcePath, 'B', steps, true);
-		pushStep(steps, 'info', '[Phase B] Complete. Compare A vs B in diff/final boxes.');
+		pushStep(steps, 'info', '[Phase B] Complete.');
 		setScanState(scanId, {
 			status: 'completed',
 			errorMessage: null,

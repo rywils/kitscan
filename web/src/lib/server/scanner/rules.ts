@@ -70,7 +70,6 @@ export function buildMatchKey(h: RuleHit): string {
 	return `${h.ruleId}|${h.filePath}|${h.line}|${h.title}`;
 }
 
-/** Phase A runs conservative core checks; Phase B runs full checks. */
 export function runRulesOnFile(ctx: LineContext): RuleHit[] {
 	const out: RuleHit[] = [];
 	const text = ctx.content;
